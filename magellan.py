@@ -61,8 +61,3 @@ class Pipeline:
                         tmp_file.write("\n".join(lines))
                     with open(tmp_tsv, 'r') as tsv:
                         self.sink.load(tsv)
-
-
-pipeline = Pipeline()
-pipeline.init_table()
-pipeline.load()
