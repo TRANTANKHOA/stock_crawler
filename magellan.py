@@ -1,4 +1,5 @@
 import csv
+import json
 import re
 import pysftp
 import logging
@@ -60,6 +61,8 @@ class Pipeline:
                                 fields[field_name] = 'REAL'
                             else:
                                 fields[field_name] = 'TEXT'
+            with open('schema.json', 'w') as schema_file:
+                schema_file.writelines(json.dumps(fields, indent=2))
             self.sink.create_table(fields)
 
     def load(self):
