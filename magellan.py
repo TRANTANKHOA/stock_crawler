@@ -102,5 +102,4 @@ class Pipeline:
                 with sftp.open(file_name) as file:
                     reader = csv.reader(file, dialect="excel-tab")
                     header = clean_header(next(reader, None))
-                    for line in [ln for ln in reader if len(ln) == len(header)]:
-                        self.sink.load(header, line)
+                    self.sink.load(header, lines=[ln for ln in reader if len(ln) == len(header)])

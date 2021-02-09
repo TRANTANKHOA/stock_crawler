@@ -45,27 +45,27 @@ class Sink:
         self.cur.execute(create_query)
         self.con.commit()
 
-    def load(self, header, line):
+    def load(self, header, lines):
         """
         Load a single line to SQL
-        :type line: list
+        :type lines: list
         :type header: list
         """
         if DATE_OF_INDEX in header:
-            self.load_by_schema(header, line, DATE_OF_INDEX, DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME)
+            self.load_by_schema(header, lines, DATE_OF_INDEX, DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME)
         elif EFFECTIVE_DATE in header:
-            self.load_by_schema(header, line, EFFECTIVE_DATE, EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME)
+            self.load_by_schema(header, lines, EFFECTIVE_DATE, EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME)
         else:
             self.logger.error(f'Found invalid header: {header}')
 
-    def load_by_schema(self, header, line, date_column, schema_file_name):
+    def load_by_schema(self, header, lines, date_column, schema_file_name):
         """
         Load one line by joining it with data already in SQL if primary keys match
 
         :param header:
         :type header: list
-        :param line:
-        :type line: list
+        :param lines:
+        :type lines: list
         :param date_column:
         :type date_column: str
         :param schema_file_name:
@@ -74,28 +74,32 @@ class Sink:
         """
         with open(schema_file_name, 'r') as schema_file:
             json_schema = json.loads(schema_file.read())
-            missing_fields = []
-            record = {}
-            for field in json_schema:
-                if field in header:
-                    record[field] = line[header.index(field)]
-                else:
-                    missing_fields.append(field)
-            if missing_fields:
-                missing_values = self.fetch_fields(missing_fields,
-                                                   date_column,
-                                                   line[header.index(date_column)],
-                                                   line[header.index(INDEX_CODE)])
-                if missing_values:
-                    for field in missing_fields:
-                        record[field] = missing_values[missing_fields.index(field)]
-        keys = record.keys()
-        # make sure that each key will default to None if the key doesn't exist in the json entry.
-        vals = [record.get(key, None) for key in keys]
-        self.con.execute(f"""
-            REPLACE INTO {self.table_name}_{date_column} ({', '.join(keys)}) 
-            VALUES({', '.join(['?' for each in keys if True])});
-        """, vals)
+            records = []
+            for line in lines:
+                record = {}
+                missing_fields = []
+                for field in json_schema:
+                    if field in header:
+                        record[field] = line[header.index(field)]
+                    else:
+                        missing_fields.append(field)
+                if missing_fields:
+                    missing_values = self.fetch_fields(missing_fields,
+                                                       date_column,
+                                                       line[header.index(date_column)],
+                                                       line[header.index(INDEX_CODE)])
+                    if missing_values:
+                        for field in missing_fields:
+                            record[field] = missing_values[missing_fields.index(field)]
+                records.append(record)
+        for rec in records:  # each record has a different number of fields so it's hard to write them together in batch
+            keys = rec.keys()
+            # make sure that each key will default to None if the key doesn't exist in the json entry.
+            vals = [rec.get(key, None) for key in keys]
+            self.con.execute(f"""
+                REPLACE INTO {self.table_name}_{date_column} ({', '.join(keys)}) 
+                VALUES ({', '.join(['?' for each in keys if True])});
+            """, vals)
         self.con.commit()
 
     def fetch_fields(self, fields, date_column, date, code):
