@@ -4,7 +4,8 @@ import re
 import pysftp
 import logging
 from common import handler
-from sink import Sink
+from sink import Sink, DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME, DATE_OF_INDEX, EFFECTIVE_DATE, \
+    EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME
 
 
 def get_sftp_connection():
@@ -26,6 +27,17 @@ def remove_non_alpha_numeric(field):
     return re.sub('[^0-9a-zA-Z]+', '_', field)
 
 
+def clean_header(header):
+    """
+    Striping out non-alphanumerical characters in fields of 'header'
+    :type header: list
+    """
+    new_header = []
+    for field in header:
+        new_header.append(remove_non_alpha_numeric(field))
+    return new_header
+
+
 class Pipeline:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -38,32 +50,46 @@ class Pipeline:
         Scanning all files in SFTP servers, reading 10 lines from each file and create a valid SQL table schema for
         storing data from these files.
 
-        For simplicity, any given field is either TEXT or REAL data
+        For simplicity, any given field is either TEXT or REAL data. It is found that files come with two type of
+        date columns
         :return:
         """
         with get_sftp_connection() as sftp:
-            fields = {}
+            date_of_index_fields = {}
+            effective_date_fields = {}
             max_lines = 10
             for file_name in sftp.listdir('/'):
                 self.logger.info(f"Parsing file {file_name}")
                 with sftp.open(file_name) as file:
                     reader = csv.reader(file, dialect="excel-tab")
-                    header = next(reader, None)
-                    count = 0
-                    for line in reader:
-                        count += 1
-                        if count > max_lines or len(line) != len(header):
-                            break
-                        for field in header:
-                            field_index = header.index(field)
-                            field_name = remove_non_alpha_numeric(field)
-                            if line[field_index].replace('.', '', 1).isdigit() and fields.get(field_name) != 'TEXT':
-                                fields[field_name] = 'REAL'
-                            else:
-                                fields[field_name] = 'TEXT'
-            with open('schema.json', 'w') as schema_file:
-                schema_file.writelines(json.dumps(fields, indent=2))
-            self.sink.create_table(fields)
+                    header = clean_header(next(reader, None))
+                    if DATE_OF_INDEX in header:
+                        self.parse_lines(date_of_index_fields, header, max_lines, reader)
+                    if EFFECTIVE_DATE in header:
+                        self.parse_lines(effective_date_fields, header, max_lines, reader)
+            self.write_schema(date_of_index_fields, DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME)
+            self.sink.create_table(date_of_index_fields, DATE_OF_INDEX, 'REAL')
+            self.write_schema(effective_date_fields, EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME)
+            self.sink.create_table(effective_date_fields, EFFECTIVE_DATE, 'TEXT')
+
+    @staticmethod
+    def write_schema(date_of_index_fields, filename):
+        with open(filename, 'w') as schema_file:
+            schema_file.writelines(json.dumps(date_of_index_fields, indent=2))
+
+    @staticmethod
+    def parse_lines(fields, header, max_lines, reader):
+        count = 0
+        for line in reader:
+            count += 1
+            if count > max_lines or len(line) != len(header):
+                break
+            for field in header:
+                field_index = header.index(field)
+                if line[field_index].replace('.', '', 1).isdigit() and fields.get(field) != 'TEXT':
+                    fields[field] = 'REAL'
+                else:
+                    fields[field] = 'TEXT'
 
     def load(self):
         """
@@ -71,23 +97,10 @@ class Pipeline:
         :return:
         """
         with get_sftp_connection() as sftp:
-            tmp_tsv = 'tmp.tsv'
             for file_name in sftp.listdir('/'):
                 self.logger.info(f"Loading file {file_name}")
                 with sftp.open(file_name) as file:
-                    lines = list(csv.reader(file, dialect="excel-tab"))
-                    # need to replace the original header with its non-alphanumeric version for SQL loading to works
-                    header = lines[0]
-                    lines = ['\t'.join(l) for l in lines if len(l) == len(header)]
-                    new_header = ''
-                    for field in header:
-                        re_sub = remove_non_alpha_numeric(field)
-                        if new_header:
-                            new_header = new_header + '\t' + re_sub
-                        else:
-                            new_header = re_sub
-                    lines[0] = new_header
-                    with open(tmp_tsv, 'w') as tmp_file:
-                        tmp_file.write("\n".join(lines))
-                    with open(tmp_tsv, 'r') as tsv:
-                        self.sink.load(tsv)
+                    reader = csv.reader(file, dialect="excel-tab")
+                    header = clean_header(next(reader, None))
+                    for line in [ln for ln in reader if len(ln) == len(header)]:
+                        self.sink.load(header, line)

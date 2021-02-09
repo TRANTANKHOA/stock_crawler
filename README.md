@@ -45,10 +45,10 @@ file versions too but it depends on the business requirements.
 
 Another benefit of having S3 is that we can register to notification of any new S3 put for new files (or versions) 
 ingested and perform necessary ETL using a separate lambda. So we will have an S3 lambda and another ETL lambda each 
-handling a separate concern. While parsing data, we come across records with `(DATE_OF_INDEX, INDEX_CODE)` already 
+handling a separate concern. While parsing data, we come across records with e.g. `(DATE_OF_INDEX, INDEX_CODE)` already 
 exist in the SQL table. Since this table is indexed by `(DATE_OF_INDEX, INDEX_CODE)`, we need to consolidate these new
 records with data in the table. However, given that the logic for this consolidation isn't available at the moment, I 
-have simply let the new records overwriting the data.
+have simply let the new records merged with the existing SQL data for same primary keys and replace the old record.
 
 Regarding the S3 lambda, it's best to delete the file from SFTP once it is successfully stored in S3. This simplify 
 implementation and save cost thanks to shorter lambda runtime subsequently. However if deleting SFTP files isn't an 
