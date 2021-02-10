@@ -139,6 +139,3 @@ class Pipeline:
                         inventory.put(attr.filename, attr.st_mtime, hashlib.md5(file.read()).hexdigest())
                         file.seek(0)
                         write_csv_to_sink(file, sink)
-
-
-Pipeline().load()
