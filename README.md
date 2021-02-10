@@ -26,6 +26,8 @@ flagged and accounted for, using potential change indicators such as the modifie
 
 ## Design
 
+![Design diagram](diagram.png)
+
 This design is up to known descriptions and I will try to elaborate on possible scenarios in practice. First I can 
 noticethat data between each file has different set of fields and also file types. It's not clear what can be assumed 
 with certainty regarding data schemas from our service providers. For now, I have implemented a function to scan 
