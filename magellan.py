@@ -1,10 +1,15 @@
 import csv
+import hashlib
 import json
 import re
+from datetime import datetime
+
 import pysftp
 import logging
 from common import handler
-from sink import Sink, DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME, DATE_OF_INDEX, EFFECTIVE_DATE, \
+from inventory import Inventory
+from sink import Sink
+from common import DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME, DATE_OF_INDEX, EFFECTIVE_DATE, \
     EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME
 
 
@@ -38,12 +43,21 @@ def clean_header(header):
     return new_header
 
 
+def convert_time(timestamp):
+    return datetime.fromtimestamp(timestamp).strftime('%b %d %Y %H:%M:%S')
+
+
+def write_csv_to_sink(file, sink):
+    reader = csv.reader(file, dialect="excel-tab")
+    header = clean_header(next(reader, None))
+    sink.load(header, lines=[ln for ln in reader if len(ln) == len(header)])
+
+
 class Pipeline:
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.DEBUG)
-        self.sink = Sink()
 
     def init_table(self):
         """
@@ -54,7 +68,7 @@ class Pipeline:
         date columns
         :return:
         """
-        with get_sftp_connection() as sftp:
+        with get_sftp_connection() as sftp, Sink() as sink:
             date_of_index_fields = {}
             effective_date_fields = {}
             max_lines = 10
@@ -68,9 +82,9 @@ class Pipeline:
                     if EFFECTIVE_DATE in header:
                         self.parse_lines(effective_date_fields, header, max_lines, reader)
             self.write_schema(date_of_index_fields, DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME)
-            self.sink.create_table(date_of_index_fields, DATE_OF_INDEX, 'REAL')
+            sink.create_table(date_of_index_fields, DATE_OF_INDEX, 'REAL')
             self.write_schema(effective_date_fields, EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME)
-            self.sink.create_table(effective_date_fields, EFFECTIVE_DATE, 'TEXT')
+            sink.create_table(effective_date_fields, EFFECTIVE_DATE, 'TEXT')
 
     @staticmethod
     def write_schema(date_of_index_fields, filename):
@@ -96,10 +110,35 @@ class Pipeline:
         Loading all files in SFTP server to a predefined table given by `self.init_table`
         :return:
         """
-        with get_sftp_connection() as sftp:
-            for file_name in sftp.listdir('/'):
-                self.logger.info(f"Loading file {file_name}")
-                with sftp.open(file_name) as file:
-                    reader = csv.reader(file, dialect="excel-tab")
-                    header = clean_header(next(reader, None))
-                    self.sink.load(header, lines=[ln for ln in reader if len(ln) == len(header)])
+        with get_sftp_connection() as sftp, Sink() as sink, Inventory() as inventory:
+            for attr in sftp.listdir_attr():
+                self.logger.info(f"Loading file {attr.filename} with timestamp "
+                                 f"{convert_time(attr.st_mtime)}")
+                existing_file = inventory.fetch(attr.filename)
+                if existing_file:
+                    filename, timestamp, checksum = existing_file
+                    timestamp = int(timestamp)
+                    if timestamp >= attr.st_mtime:
+                        self.logger.info(f"This file was previously loaded with a later or equal timestamp "
+                                         f"{convert_time(timestamp)}. Skipping..")
+                    else:
+                        self.logger.info(f"This file was previously loaded with an earlier timestamp "
+                                         f"{convert_time(timestamp)}")
+                        with sftp.open(attr.filename) as file:
+                            # file size is quicker to compute but is a less restrictive constrain
+                            new_checksum = hashlib.md5(file.read()).hexdigest()
+                            if new_checksum == checksum:
+                                self.logger.info(f"This file has the same checksum with previous file. Skipping..")
+                                continue
+                            self.logger.info(f"This file has new checksum. Updating inventory..")
+                            inventory.put(attr.filename, attr.st_mtime, new_checksum)
+                            file.seek(0)
+                            write_csv_to_sink(file, sink)
+                else:
+                    with sftp.open(attr.filename) as file:
+                        inventory.put(attr.filename, attr.st_mtime, hashlib.md5(file.read()).hexdigest())
+                        file.seek(0)
+                        write_csv_to_sink(file, sink)
+
+
+Pipeline().load()

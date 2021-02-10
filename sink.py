@@ -1,13 +1,8 @@
 import json
 import logging
 import sqlite3
-from common import handler
-
-INDEX_CODE = 'INDEX_CODE'
-DATE_OF_INDEX = 'DATE_OF_INDEX'
-EFFECTIVE_DATE = 'EFFECTIVE_DATE'
-DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME = f'{DATE_OF_INDEX}.json'
-EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME = f'{EFFECTIVE_DATE}.json'
+from common import handler, INDEX_CODE, DATE_OF_INDEX, EFFECTIVE_DATE_SCHEMA_JSON_FILE_NAME, EFFECTIVE_DATE, \
+    DATE_OF_INDEX_SCHEMA_JSON_FILE_NAME
 
 
 class Sink:
@@ -19,6 +14,13 @@ class Sink:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.DEBUG)
+
+    def __enter__(self):
+        self.__init__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def create_table(self, fields, date_column, date_type):
         """

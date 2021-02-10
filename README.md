@@ -26,16 +26,16 @@ flagged and accounted for, using potential change indicators such as the modifie
 
 ## Design
 
-This design is up to known descriptions and I will try to elaborate on possible scenarios in practice. First I can notice
-that data between each file has different set of fields and also file types. It's not clear what can be assumed with 
-certainty regarding data schemas from our service providers. For now, I have implemented a function to scan available 
-data to define a generic flat table schema containing all possible fields across all files. The table will be store in 
-a SQLite local database on disk for demonstration purpose. See `magellan.Pipeline.init_table` method for details.
+This design is up to known descriptions and I will try to elaborate on possible scenarios in practice. First I can 
+noticethat data between each file has different set of fields and also file types. It's not clear what can be assumed 
+with certainty regarding data schemas from our service providers. For now, I have implemented a function to scan 
+available data to define a generic flat table schema containing all possible fields across all files. The table will be 
+store in a SQLite local database on disk for demonstration purpose. See `magellan.Pipeline.init_table` method for details.
 
-All files appear to be tab separated file format, however
-some file has an end line with the line count as summary, i.e. the last line in some files isn't part of the intended 
-file content. This can possibly be used to detect data integrity but it depends on the service providers consistently 
-setting this summary at the end of file. This line summary is ignore by the demo implementation for now.
+All files appear to be tab separated file format, however some file has an end line with the line count as summary, 
+i.e. the last line in some files isn't part of the intended file content. This can possibly be used to detect data 
+integrity but it depends on the service providers consistently setting this summary at the end of file. This line 
+summary is ignore by the demo implementation for now.
 
 Although not demonstrated here, I think it's best to mirror this SFTP data source to an S3 bucket for archival, with 
 object life cycle setting so that files older than e.g. 30 days are moved to glacier tier for cost saving. This can be 
@@ -50,10 +50,10 @@ exist in the SQL table. Since this table is indexed by `(DATE_OF_INDEX, INDEX_CO
 records with data in the table. However, given that the logic for this consolidation isn't available at the moment, I 
 have simply let the new records merged with the existing SQL data for same primary keys and replace the old record.
 
-Regarding the S3 lambda, it's best to delete the file from SFTP once it is successfully stored in S3. This simplify 
+Regarding the S3 lambda, it's best to delete the file from SFTP once it is successfully stored in S3. This simplifies 
 implementation and save cost thanks to shorter lambda runtime subsequently. However if deleting SFTP files isn't an 
-option, this lambda need to maintain a persistent list of `[{filename, timestamp, checksum}]` for files processed in the window. 
-Such list can be kept in the same S3 bucket as e.g. a json file.
+option, this lambda needs to maintain a persistent list of `[{filename, timestamp, checksum}]` for files processed in 
+the window. Such list can be kept in fast serverless database such as DynamoDB with `filename` as the partition key.
 
 A final benefit of S3 is that storing csv files there enable us to query data directly with SQL using Athena, which is
 serverless and can be cheaper than maintaining an RDS instance for the same purpose. This is because S3 storage is much
